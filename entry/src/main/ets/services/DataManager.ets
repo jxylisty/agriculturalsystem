@@ -1,4 +1,5 @@
 import { SensorData, bleService } from './BleService';
+import { connectionModeManager } from './ConnectionModeManager';
 
 export interface AlertThreshold {
   name: string;
@@ -134,10 +135,10 @@ class DataManager {
       this.irrigationConfig.duration = config.duration;
     }
     if (config.isOn !== undefined) {
-      bleService.sendCommand('irrigation', config.isOn ? 1 : 0);
+      connectionModeManager.sendCommand('irrigation', config.isOn ? 1 : 0);
     }
     if (config.targetMoisture !== undefined) {
-      bleService.sendCommand('target_moisture', config.targetMoisture);
+      connectionModeManager.sendCommand('target_moisture', config.targetMoisture);
     }
   }
 
@@ -162,10 +163,10 @@ class DataManager {
       this.lightConfig.endTime = config.endTime;
     }
     if (config.isOn !== undefined) {
-      bleService.sendCommand('light', config.isOn ? 1 : 0);
+      connectionModeManager.sendCommand('light', config.isOn ? 1 : 0);
     }
     if (config.brightness !== undefined) {
-      bleService.sendCommand('brightness', config.brightness);
+      connectionModeManager.sendCommand('brightness', config.brightness);
     }
   }
 

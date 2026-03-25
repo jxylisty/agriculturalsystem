@@ -1,39 +1,46 @@
 import { router } from '@kit.ArkUI';
-import { dataManager, SensorData } from '../services/DataManager';
-import { bleService } from '../services/BleService';
+import { mqttService } from '../services/MqttService';
+import { SensorDataModel, sensorDataModel } from '../services/SensorDataModel';
+import { AppStorageUtil } from '../services/AppStorageUtil';
 
 @Entry
 @Component
 struct Index {
-  @State deviceStatus: string = '未连接';
-  @State isConnected: boolean = false;
-  @State temperature: number = 25;
-  @State humidity: number = 65;
-  @State soilMoisture: number = 45;
-  @State lightLevel: number = 300;
-  @State waterLevel: number = 75;
-  @State co2: number = 450;
+  @StorageLink('is_connected') isConnected: boolean = false;
+  @StorageLink('mode_status') modeStatus: string = '本地模拟模式';
+  @State sensorData: SensorDataModel = sensorDataModel;
+
+  private refreshTimer: number = -1;
 
   aboutToAppear(): void {
-    this.isConnected = bleService.getConnectionStatus();
-    
-    const initialData = dataManager.getCurrentData();
-    this.temperature = initialData.temperature;
-    this.humidity = initialData.humidity;
-    this.soilMoisture = initialData.soilMoisture;
-    this.lightLevel = initialData.lightLevel;
-    this.waterLevel = initialData.waterLevel;
-    this.co2 = initialData.co2;
+    console.log('[Index] aboutToAppear, isConnected=' + this.isConnected);
+  }
 
-    dataManager.setDataCallback((data: SensorData) => {
-      this.temperature = data.temperature;
-      this.humidity = data.humidity;
-      this.soilMoisture = data.soilMoisture;
-      this.lightLevel = data.lightLevel;
-      this.waterLevel = data.waterLevel;
-      this.co2 = data.co2;
-      this.isConnected = bleService.getConnectionStatus();
-    });
+  aboutToDisappear(): void {
+    this.stopPolling();
+  }
+
+  onPageShow(): void {
+    this.refreshStatus();
+  }
+
+  private startPolling(): void {
+    this.refreshTimer = setInterval(() => {
+      this.refreshStatus();
+    }, 5000);
+    console.log('[Index] Polling started');
+  }
+
+  private stopPolling(): void {
+    if (this.refreshTimer !== -1) {
+      clearInterval(this.refreshTimer);
+      this.refreshTimer = -1;
+    }
+  }
+
+  private refreshStatus(): void {
+    this.isConnected = AppStorageUtil.isConnected();
+    this.modeStatus = AppStorageUtil.getModeStatus();
   }
 
   build() {
@@ -45,11 +52,11 @@ struct Index {
           .margin({ top: 40, bottom: 20 });
 
         Row() {
-          Text('蓝牙状态: ')
+          Text('当前模式: ')
             .fontSize(16);
-          Text(this.isConnected ? '已连接' : '未连接')
+          Text(this.modeStatus)
             .fontSize(16)
-            .fontColor(this.isConnected ? '#4CAF50' : '#F44336');
+            .fontColor(this.isConnected ? '#4CAF50' : '#FF9800');
         }
         .margin({ bottom: 15 });
 
@@ -61,85 +68,144 @@ struct Index {
                 .fontWeight(FontWeight.Medium)
                 .fontColor('#FF9800');
             }
-            .width('100%')
-            .margin({ bottom: 8 });
-
-            Text('以下数据为系统模拟生成，非真实传感器数据：')
+            .width('100%');
+            Text('点击下方"连接模式"切换到云服务')
               .fontSize(12)
               .fontColor('#888888')
               .width('100%')
-              .margin({ bottom: 5 });
-
-            Text('• 温度、湿度：模拟环境数据')
-              .fontSize(11)
-              .fontColor('#AAAAAA')
-              .width('100%');
-
-            Text('• 土壤湿度、光照：模拟传感器读数')
-              .fontSize(11)
-              .fontColor('#AAAAAA')
-              .width('100%');
-
-            Text('• CO2浓度、水位：模拟监测数据')
-              .fontSize(11)
-              .fontColor('#AAAAAA')
-              .width('100%');
-
-            Text('请前往「设备管理」连接硬件获取真实数据')
-              .fontSize(12)
-              .fontColor('#2196F3')
-              .width('100%')
-              .margin({ top: 8 });
+              .margin({ top: 5 });
           }
           .width('90%')
           .padding(15)
           .backgroundColor('#FFF8E1')
           .borderRadius(10)
           .margin({ bottom: 20 });
+        } else {
+          Column() {
+            Row() {
+              Text('✓ 已连接到云服务')
+                .fontSize(14)
+                .fontWeight(FontWeight.Medium)
+                .fontColor('#4CAF50');
+            }
+            .width('100%');
+            Text('实时接收传感器数据')
+              .fontSize(12)
+              .fontColor('#888888')
+              .width('100%')
+              .margin({ top: 5 });
+          }
+          .width('90%')
+          .padding(15)
+          .backgroundColor('#E8F5E9')
+          .borderRadius(10)
+          .margin({ bottom: 20 });
         }
 
         Column({ space: 15 }) {
-          this.MenuItem('智能灌溉', '控制灌溉系统', () => {
-            router.pushUrl({ url: 'pages/IrrigationPage' });
-          });
+          Row() {
+            Column() {
+              Text('智能灌溉')
+                .fontSize(18)
+                .fontWeight(FontWeight.Medium);
+              Text('控制水阀灌溉')
+                .fontSize(12)
+                .fontColor('#888888')
+                .margin({ top: 5 });
+            }
+            .alignItems(HorizontalAlign.Start);
+            Blank();
+            Text('>').fontSize(20).fontColor('#CCCCCC');
+          }
+          .width('100%')
+          .padding(15)
+          .backgroundColor('#FFFFFF')
+          .borderRadius(10)
+          .onClick(() => { router.pushUrl({ url: 'pages/IrrigationPage' }); });
 
-          this.MenuItem('智能光照', '控制光照系统', () => {
-            router.pushUrl({ url: 'pages/LightPage' });
-          });
+          Row() {
+            Column() {
+              Text('智能补光')
+                .fontSize(18)
+                .fontWeight(FontWeight.Medium);
+              Text('控制植物补光')
+                .fontSize(12)
+                .fontColor('#888888')
+                .margin({ top: 5 });
+            }
+            .alignItems(HorizontalAlign.Start);
+            Blank();
+            Text('>').fontSize(20).fontColor('#CCCCCC');
+          }
+          .width('100%')
+          .padding(15)
+          .backgroundColor('#FFFFFF')
+          .borderRadius(10)
+          .onClick(() => { router.pushUrl({ url: 'pages/LightPage' }); });
 
-          this.MenuItem('阈值预警', '设置预警参数', () => {
-            router.pushUrl({ url: 'pages/AlertPage' });
-          });
+          Row() {
+            Column() {
+              Text('阈值预警')
+                .fontSize(18)
+                .fontWeight(FontWeight.Medium);
+              Text('设置预警参数')
+                .fontSize(12)
+                .fontColor('#888888')
+                .margin({ top: 5 });
+            }
+            .alignItems(HorizontalAlign.Start);
+            Blank();
+            Text('>').fontSize(20).fontColor('#CCCCCC');
+          }
+          .width('100%')
+          .padding(15)
+          .backgroundColor('#FFFFFF')
+          .borderRadius(10)
+          .onClick(() => { router.pushUrl({ url: 'pages/AlertPage' }); });
 
-          this.MenuItem('设备管理', '蓝牙设备连接', () => {
-            router.pushUrl({ url: 'pages/DevicePage' });
-          });
+          Row() {
+            Column() {
+              Text('连接模式')
+                .fontSize(18)
+                .fontWeight(FontWeight.Medium);
+              Text('切换蓝牙/云服务')
+                .fontSize(12)
+                .fontColor('#888888')
+                .margin({ top: 5 });
+            }
+            .alignItems(HorizontalAlign.Start);
+            Blank();
+            Text('>').fontSize(20).fontColor('#CCCCCC');
+          }
+          .width('100%')
+          .padding(15)
+          .backgroundColor('#FFFFFF')
+          .borderRadius(10)
+          .onClick(() => { router.pushUrl({ url: 'pages/ModeSelectPage' }); });
+
+          Row() {
+            Column() {
+              Text('环境数据查询')
+                .fontSize(18)
+                .fontWeight(FontWeight.Medium);
+              Text('查看详细环境数据')
+                .fontSize(12)
+                .fontColor('#888888')
+                .margin({ top: 5 });
+            }
+            .alignItems(HorizontalAlign.Start);
+            Blank();
+            Text('>').fontSize(20).fontColor('#CCCCCC');
+          }
+          .width('100%')
+          .padding(15)
+          .backgroundColor('#FFFFFF')
+          .borderRadius(10)
+          .onClick(() => { router.pushUrl({ url: 'pages/DataPage' }); })
+          .margin({ top: 20, bottom: 30 });
         }
         .width('90%')
         .margin({ top: 20 });
-
-        Text('当前环境数据')
-          .fontSize(18)
-          .fontWeight(FontWeight.Medium)
-          .margin({ top: 30, bottom: 10 });
-
-        Row() {
-          this.DataCard('温度', `${this.temperature.toFixed(1)}°C`);
-          this.DataCard('湿度', `${this.humidity.toFixed(0)}%`);
-          this.DataCard('土壤', `${this.soilMoisture.toFixed(0)}%`);
-        }
-        .width('90%')
-        .justifyContent(FlexAlign.SpaceBetween)
-        .margin({ bottom: 10 });
-
-        Row() {
-          this.DataCard('CO2', `${this.co2.toFixed(0)}ppm`);
-          this.DataCard('光照', `${this.lightLevel.toFixed(0)}lux`);
-          this.DataCard('水位', `${this.waterLevel.toFixed(0)}%`);
-        }
-        .width('90%')
-        .justifyContent(FlexAlign.SpaceBetween)
-        .margin({ bottom: 30 });
       }
       .width('100%')
       .backgroundColor('#F5F5F5');
@@ -148,49 +214,5 @@ struct Index {
     .height('100%')
     .backgroundColor('#F5F5F5')
     .scrollBar(BarState.Auto);
-  }
-
-  @Builder
-  MenuItem(title: string, desc: string, onClick: () => void) {
-    Row() {
-      Column() {
-        Text(title)
-          .fontSize(18)
-          .fontWeight(FontWeight.Medium);
-        Text(desc)
-          .fontSize(12)
-          .fontColor('#888888')
-          .margin({ top: 5 });
-      }
-      .alignItems(HorizontalAlign.Start);
-
-      Blank();
-
-      Text('>')
-        .fontSize(20)
-        .fontColor('#CCCCCC');
-    }
-    .width('100%')
-    .padding(15)
-    .backgroundColor('#FFFFFF')
-    .borderRadius(10)
-    .onClick(onClick);
-  }
-
-  @Builder
-  DataCard(title: string, value: string) {
-    Column() {
-      Text(title)
-        .fontSize(14)
-        .fontColor('#888888');
-      Text(value)
-        .fontSize(24)
-        .fontWeight(FontWeight.Bold)
-        .margin({ top: 5 });
-    }
-    .width('30%')
-    .padding(15)
-    .backgroundColor('#FFFFFF')
-    .borderRadius(10);
   }
 }

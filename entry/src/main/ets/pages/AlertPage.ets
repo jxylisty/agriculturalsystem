@@ -1,8 +1,10 @@
 import { router } from '@kit.ArkUI';
-import { dataManager, SensorData, AlertThreshold, AlertRecord } from '../services/DataManager';
+import { mqttService } from '../services/MqttService';
+import { SensorDataModel, sensorDataModel } from '../services/SensorDataModel';
 
 interface AlertItem {
   name: string;
+  key: string;
   minValue: number;
   maxValue: number;
   currentValue: number;
@@ -13,85 +15,48 @@ interface AlertItem {
 @Entry
 @Component
 struct AlertPage {
-  @State alertList: AlertItem[] = [];
-  @State alertHistory: AlertRecord[] = [];
+  @State alertList: AlertItem[] = [
+    { name: '温度', key: 'temperature', minValue: 15, maxValue: 35, currentValue: 25, unit: '°C', isAlert: false },
+    { name: '湿度', key: 'humidity', minValue: 30, maxValue: 80, currentValue: 60, unit: '%', isAlert: false },
+    { name: '土壤湿度', key: 'soilMoisture', minValue: 20, maxValue: 70, currentValue: 50, unit: '%', isAlert: false },
+    { name: '光照强度', key: 'lightLevel', minValue: 100, maxValue: 800, currentValue: 300, unit: 'lux', isAlert: false },
+    { name: '水位', key: 'waterLevel', minValue: 20, maxValue: 100, currentValue: 80, unit: '%', isAlert: false },
+    { name: 'CO2浓度', key: 'co2', minValue: 300, maxValue: 1000, currentValue: 450, unit: 'ppm', isAlert: false }
+  ];
+  @State sensorData: SensorDataModel = sensorDataModel;
+  @State isMqttMode: boolean = false;
 
   aboutToAppear(): void {
-    this.initAlertList();
-    this.alertHistory = dataManager.getAlertHistory();
-
-    dataManager.setDataCallback((data: SensorData) => {
-      this.updateCurrentValues(data);
-    });
-
-    dataManager.setAlertCallback((alert: AlertRecord) => {
-      this.alertHistory = dataManager.getAlertHistory();
-    });
+    this.isMqttMode = mqttService.isConnected();
+    this.updateCurrentValues();
+    console.log('[AlertPage] aboutToAppear, isMqttMode=' + this.isMqttMode);
   }
 
-  private initAlertList(): void {
-    const thresholds = dataManager.getThresholds();
-    const currentData = dataManager.getCurrentData();
-    
-    const nameMap: (name: string) => string = (name: string) => {
-      if (name === 'temperature') return '温度';
-      if (name === 'humidity') return '湿度';
-      if (name === 'soilMoisture') return '土壤湿度';
-      if (name === 'lightLevel') return '光照强度';
-      if (name === 'waterLevel') return '水位';
-      if (name === 'co2') return 'CO2浓度';
-      return name;
-    };
-
-    const getValue = (name: string): number => {
-      if (name === 'temperature') return currentData.temperature;
-      if (name === 'humidity') return currentData.humidity;
-      if (name === 'soilMoisture') return currentData.soilMoisture;
-      if (name === 'lightLevel') return currentData.lightLevel;
-      if (name === 'waterLevel') return currentData.waterLevel;
-      if (name === 'co2') return currentData.co2;
-      return 0;
-    };
-
-    const newList: AlertItem[] = [];
-    for (let i = 0; i < thresholds.length; i++) {
-      const t = thresholds[i];
-      const value = getValue(t.name);
-      const newItem: AlertItem = {
-        name: nameMap(t.name),
-        minValue: t.minValue,
-        maxValue: t.maxValue,
-        currentValue: value,
-        unit: t.unit,
-        isAlert: value < t.minValue || value > t.maxValue
-      };
-      newList.push(newItem);
-    }
-    this.alertList = newList;
-  }
-
-  private updateCurrentValues(data: SensorData): void {
+  private updateCurrentValues(): void {
+    const data = sensorDataModel;
     const newList: AlertItem[] = [];
     for (let i = 0; i < this.alertList.length; i++) {
       const item = this.alertList[i];
-      let value = item.currentValue;
+      let value = 0;
       
-      if (item.name === '温度') value = data.temperature;
-      else if (item.name === '湿度') value = data.humidity;
-      else if (item.name === '土壤湿度') value = data.soilMoisture;
-      else if (item.name === '光照强度') value = data.lightLevel;
-      else if (item.name === '水位') value = data.waterLevel;
-      else if (item.name === 'CO2浓度') value = data.co2;
+      switch (item.key) {
+        case 'temperature': value = data.temperature; break;
+        case 'humidity': value = data.humidity; break;
+        case 'soilMoisture': value = data.soilMoisture; break;
+        case 'lightLevel': value = data.lightLevel; break;
+        case 'waterLevel': value = data.waterLevel; break;
+        case 'co2': value = data.co2; break;
+      }
 
-      const newItem: AlertItem = {
+      newList.push({
         name: item.name,
+        key: item.key,
         minValue: item.minValue,
         maxValue: item.maxValue,
         currentValue: value,
         unit: item.unit,
         isAlert: value < item.minValue || value > item.maxValue
-      };
-      newList.push(newItem);
+      });
     }
     this.alertList = newList;
   }
@@ -112,6 +77,27 @@ struct AlertPage {
         }
         .width('90%')
         .margin({ top: 20, bottom: 30 });
+
+        Column() {
+          Text('连接状态')
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .margin({ bottom: 10 });
+
+          Row() {
+            Text('MQTT状态: ')
+              .fontSize(14);
+            Text(this.isMqttMode ? '已连接' : '未连接')
+              .fontSize(14)
+              .fontColor(this.isMqttMode ? '#4CAF50' : '#F44336')
+              .fontWeight(FontWeight.Medium);
+          }
+        }
+        .width('90%')
+        .padding(15)
+        .backgroundColor('#FFE0B2')
+        .borderRadius(10)
+        .margin({ bottom: 20 });
 
         Column() {
           Text('预警状态')
@@ -136,7 +122,7 @@ struct AlertPage {
         }
         .width('90%')
         .padding(15)
-        .backgroundColor('#FFFFFF')
+        .backgroundColor('#FFE0B2')
         .borderRadius(10)
         .margin({ bottom: 20 });
 
@@ -152,16 +138,16 @@ struct AlertPage {
           .height(50)
           .backgroundColor('#2196F3')
           .onClick(() => {
-            this.initAlertList();
+            this.updateCurrentValues();
           })
           .margin({ top: 20, bottom: 30 });
       }
       .width('100%')
-      .backgroundColor('#F5F5F5');
+      .backgroundColor('#FFA726');
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F5F5F5')
+    .backgroundColor('#FFA726')
     .scrollBar(BarState.Auto);
   }
 
@@ -172,20 +158,6 @@ struct AlertPage {
       }
     }
     return false;
-  }
-
-  private updateThreshold(index: number, minVal: number, maxVal: number): void {
-    const item = this.alertList[index];
-    const nameToKey = (name: string): string => {
-      if (name === '温度') return 'temperature';
-      if (name === '湿度') return 'humidity';
-      if (name === '土壤湿度') return 'soilMoisture';
-      if (name === '光照强度') return 'lightLevel';
-      if (name === '水位') return 'waterLevel';
-      if (name === 'CO2浓度') return 'co2';
-      return name;
-    };
-    dataManager.updateThreshold(nameToKey(item.name), minVal, maxVal);
   }
 
   @Builder
@@ -229,7 +201,7 @@ struct AlertPage {
           .onChange((value: string) => {
             const minVal = parseInt(value) || 0;
             this.alertList[index].minValue = minVal;
-            this.updateThreshold(index, minVal, item.maxValue);
+            this.alertList[index].isAlert = item.currentValue < minVal || item.currentValue > item.maxValue;
           });
         Text('上限:')
           .fontSize(12)
@@ -242,7 +214,7 @@ struct AlertPage {
           .onChange((value: string) => {
             const maxVal = parseInt(value) || 0;
             this.alertList[index].maxValue = maxVal;
-            this.updateThreshold(index, item.minValue, maxVal);
+            this.alertList[index].isAlert = item.currentValue < item.minValue || item.currentValue > maxVal;
           });
       }
       .width('100%')
@@ -250,7 +222,7 @@ struct AlertPage {
     }
     .width('100%')
     .padding(15)
-    .backgroundColor('#FFFFFF')
+    .backgroundColor('#FFE0B2')
     .borderRadius(10);
   }
 }

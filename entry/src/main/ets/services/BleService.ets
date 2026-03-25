@@ -23,6 +23,7 @@ export class BleService {
   private connectedDeviceId: string = '';
   private scanResultCallback: ((devices: BleDevice[]) => void) | null = null;
   private dataCallback: ((data: SensorData) => void) | null = null;
+  private connectionCallback: ((connected: boolean) => void) | null = null;
   private foundDevices: BleDevice[] = [];
 
   static getInstance(): BleService {
@@ -107,6 +108,9 @@ export class BleService {
       await new Promise<void>(resolve => setTimeout(resolve, 1000));
       this.connectedDeviceId = deviceId;
       this.isConnected = true;
+      if (this.connectionCallback) {
+        this.connectionCallback(true);
+      }
       console.info(`Connected to device: ${deviceId}`);
       return true;
     } catch (err) {
@@ -124,6 +128,9 @@ export class BleService {
       }
       this.connectedDeviceId = '';
       this.isConnected = false;
+      if (this.connectionCallback) {
+        this.connectionCallback(false);
+      }
       console.info('Disconnected');
       return true;
     } catch (err) {
@@ -143,6 +150,14 @@ export class BleService {
 
   setDataCallback(callback: (data: SensorData) => void): void {
     this.dataCallback = callback;
+  }
+
+  onDataReceived(callback: (data: SensorData) => void): void {
+    this.dataCallback = callback;
+  }
+
+  onConnectionChange(callback: (connected: boolean) => void): void {
+    this.connectionCallback = callback;
   }
 
   async sendCommand(command: string, value: number): Promise<boolean> {

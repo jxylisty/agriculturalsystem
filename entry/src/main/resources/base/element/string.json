@@ -11,6 +11,10 @@
     {
       "name": "EntryAbility_label",
       "value": "label"
+    },
+    {
+      "name": "permission_internet_reason",
+      "value": "用于连接MQTT服务器获取传感器数据"
     }
   ]
 }

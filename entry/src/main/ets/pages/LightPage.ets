@@ -1,30 +1,112 @@
 import { router } from '@kit.ArkUI';
-import { dataManager, SensorData, LightConfig } from '../services/DataManager';
+import { mqttService } from '../services/MqttService';
+import { ControlStateUtil, setProgrammaticUpdate, getProgrammaticUpdate } from '../services/ControlState';
+import { SensorDataModel, sensorDataModel } from '../services/SensorDataModel';
+import { promptAction } from '@kit.ArkUI';
+
+@Component
+struct LightStatus {
+  @ObjectLink data: SensorDataModel;
+
+  build() {
+    Column() {
+      Text('当前光照')
+        .fontSize(16)
+        .fontWeight(FontWeight.Medium)
+        .margin({ bottom: 15 });
+
+      Row() {
+        Column() {
+          Text('光照强度')
+            .fontSize(12)
+            .fontColor('#888888');
+          Text(`${this.data.lightLevel.toFixed(0)} lux`)
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .margin({ top: 5 });
+        }
+        .width('100%')
+        .padding(15)
+        .backgroundColor('#F9F9F9')
+        .borderRadius(8);
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.SpaceBetween);
+    }
+    .width('90%')
+    .padding(15)
+    .backgroundColor('#FFFFFF')
+    .borderRadius(10);
+  }
+}
 
 @Entry
 @Component
 struct LightPage {
-  @State isLightOn: boolean = false;
-  @State lightBrightness: number = 50;
-  @State autoMode: boolean = true;
+  @State sensorData: SensorDataModel = sensorDataModel;
+  @StorageLink('lightOn') lightOn: boolean = false;
+  @StorageLink('lightAutoMode') lightAutoMode: boolean = true;
   @State currentLightLevel: number = 300;
-  @State startTime: string = '06:00';
-  @State endTime: string = '18:00';
+  @State eastBrightness: number = 50;
+  @State westBrightness: number = 50;
+  @State southBrightness: number = 50;
+  @State northBrightness: number = 50;
+  @State lightDirection: string = '东南';
+  @State recommendedStrength: number = 400;
+  @State recommendedDirection: string = '东南';
+  @State isMqttMode: boolean = false;
 
   aboutToAppear(): void {
-    const config = dataManager.getLightConfig();
-    this.isLightOn = config.isOn;
-    this.autoMode = config.autoMode;
-    this.lightBrightness = config.brightness;
-    this.startTime = config.startTime;
-    this.endTime = config.endTime;
+    this.isMqttMode = mqttService.isConnected();
+    console.log('[LightPage] aboutToAppear, isMqttMode=' + this.isMqttMode + ', lightOn=' + this.lightOn + ', lightAutoMode=' + this.lightAutoMode);
+  }
 
-    const currentData = dataManager.getCurrentData();
-    this.currentLightLevel = currentData.lightLevel;
+  private toggleLight(): void {
+    if (this.lightAutoMode && this.isMqttMode) {
+      promptAction.showDialog({
+        title: '自动模式提示',
+        message: '当前处于自动模式，系统会根据光照强度自动控制补光。\n\n手动操作可能会被自动控制覆盖，是否继续？',
+        buttons: [
+          { text: '取消', color: '#888888' },
+          { text: '继续操作', color: '#4CAF50' }
+        ]
+      }, (err, data) => {
+        if (!err && data.index === 1) {
+          this.doToggleLight();
+        }
+      });
+    } else {
+      this.doToggleLight();
+    }
+  }
 
-    dataManager.setDataCallback((data: SensorData) => {
-      this.currentLightLevel = data.lightLevel;
-    });
+  private doToggleLight(): void {
+    const newState = !this.lightOn;
+    console.log('[LightPage] doToggleLight: ' + this.lightOn + ' -> ' + newState);
+    ControlStateUtil.updateLight(newState, this.lightAutoMode);
+    if (this.isMqttMode) {
+      mqttService.publishLightCommand(newState, this.lightAutoMode);
+    }
+  }
+
+  private toggleAutoMode(): void {
+    const newAutoMode = !this.lightAutoMode;
+    console.log('[LightPage] toggleAutoMode: ' + this.lightAutoMode + ' -> ' + newAutoMode);
+    ControlStateUtil.updateLight(this.lightOn, newAutoMode);
+    if (this.isMqttMode) {
+      mqttService.publishLightCommand(this.lightOn, newAutoMode);
+    }
+  }
+
+  private updateBrightness(): void {
+    if (this.isMqttMode) {
+      mqttService.publishLightDirectionalCommand(
+        this.eastBrightness,
+        this.westBrightness,
+        this.southBrightness,
+        this.northBrightness
+      );
+    }
   }
 
   build() {
@@ -44,15 +126,105 @@ struct LightPage {
         .width('90%')
         .margin({ top: 20, bottom: 30 });
 
+        if (!this.isMqttMode) {
+          Column() {
+            Row() {
+              Text('⚠️ 本地模式')
+                .fontSize(14)
+                .fontColor('#FF9800');
+            }
+            .width('100%');
+            Text('控制命令仅在本地生效，不会发送到设备')
+              .fontSize(12)
+              .fontColor('#888888')
+              .width('100%')
+              .margin({ top: 5 });
+          }
+          .width('90%')
+          .padding(15)
+          .backgroundColor('#FFF8E1')
+          .borderRadius(10)
+          .margin({ bottom: 20 });
+        }
+
+        if (this.lightAutoMode && this.isMqttMode) {
+          Column() {
+            Row() {
+              Text('🤖 自动模式运行中')
+                .fontSize(14)
+                .fontColor('#4CAF50');
+            }
+            .width('100%');
+            Text('系统会根据光照强度自动控制补光，开关已被禁用')
+              .fontSize(12)
+              .fontColor('#888888')
+              .width('100%')
+              .margin({ top: 5 });
+          }
+          .width('90%')
+          .padding(15)
+          .backgroundColor('#E8F5E9')
+          .borderRadius(10)
+          .margin({ bottom: 20 });
+        }
+
+        Row({ space: 10 }) {
+          Column() {
+            Text('当前光照强度')
+              .fontSize(14)
+              .fontColor('#666666');
+            Row({ space: 5 }) {
+              Text(`${this.sensorData.lightLevel.toFixed(0)}`)
+                .fontSize(24)
+                .fontWeight(FontWeight.Bold);
+              Text(' lux')
+                .fontSize(14)
+                .fontColor('#666666');
+            }
+            .margin({ top: 5 });
+          }
+          .width('48%')
+          .height(80)
+          .padding(15)
+          .backgroundColor('#FFE0B2')
+          .borderRadius(10)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center);
+
+          Column() {
+            Text('当前光照方向')
+              .fontSize(14)
+              .fontColor('#666666');
+            Text(this.lightDirection)
+              .fontSize(24)
+              .fontWeight(FontWeight.Bold)
+              .margin({ top: 5 });
+          }
+          .width('48%')
+          .height(80)
+          .padding(15)
+          .backgroundColor('#FFE0B2')
+          .borderRadius(10)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center);
+        }
+        .width('90%')
+        .margin({ bottom: 20 });
+
         Column() {
           Row() {
-            Text('光照开关')
+            Text('补光开关')
               .fontSize(18);
             Blank();
-            Toggle({ type: ToggleType.Switch, isOn: this.isLightOn })
+            Toggle({ type: ToggleType.Switch, isOn: this.lightOn })
+              .enabled(!this.lightAutoMode || !this.isMqttMode)
+              .opacity(this.lightAutoMode && this.isMqttMode ? 0.4 : 1)
               .onChange((isOn: boolean) => {
-                this.isLightOn = isOn;
-                dataManager.setLightConfig({ isOn: isOn });
+                if (getProgrammaticUpdate()) {
+                  setProgrammaticUpdate(false);
+                  return;
+                }
+                this.toggleLight();
               });
           }
           .width('100%')
@@ -64,10 +236,13 @@ struct LightPage {
             Text('自动模式')
               .fontSize(18);
             Blank();
-            Toggle({ type: ToggleType.Switch, isOn: this.autoMode })
+            Toggle({ type: ToggleType.Switch, isOn: this.lightAutoMode })
               .onChange((isOn: boolean) => {
-                this.autoMode = isOn;
-                dataManager.setLightConfig({ autoMode: isOn });
+                if (getProgrammaticUpdate()) {
+                  setProgrammaticUpdate(false);
+                  return;
+                }
+                this.toggleAutoMode();
               });
           }
           .width('100%')
@@ -78,110 +253,88 @@ struct LightPage {
         .borderRadius(10)
         .margin({ bottom: 20 });
 
-        Column() {
-          Text('当前环境光照')
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
-            .margin({ bottom: 10 });
+        LightStatus({ data: this.sensorData });
 
-          Row() {
-            Text(`${this.currentLightLevel.toFixed(0)}`)
-              .fontSize(36)
-              .fontWeight(FontWeight.Bold);
-            Text(' lux')
-              .fontSize(16)
-              .margin({ top: 15 });
-          }
+        Column({ space: 15 }) {
+          this.LightSliderBuilder('东向灯强', this.eastBrightness, (value: number) => {
+            this.eastBrightness = value;
+            this.updateBrightness();
+          });
+
+          this.LightSliderBuilder('西向灯强', this.westBrightness, (value: number) => {
+            this.westBrightness = value;
+            this.updateBrightness();
+          });
+
+          this.LightSliderBuilder('南向灯强', this.southBrightness, (value: number) => {
+            this.southBrightness = value;
+            this.updateBrightness();
+          });
+
+          this.LightSliderBuilder('北向灯强', this.northBrightness, (value: number) => {
+            this.northBrightness = value;
+            this.updateBrightness();
+          });
         }
         .width('90%')
-        .padding(20)
-        .backgroundColor('#FFFFFF')
-        .borderRadius(10)
-        .margin({ bottom: 20 });
+        .margin({ top: 20, bottom: 20 });
 
-        Column() {
-          Text('亮度调节')
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
-            .margin({ bottom: 10 });
-
-          Row() {
-            Text('亮度: ')
-              .fontSize(14);
-            Text(`${this.lightBrightness}%`)
-              .fontSize(14)
-              .fontWeight(FontWeight.Bold);
-          }
-          .width('100%')
-          .margin({ bottom: 10 });
-
-          Slider({
-            value: this.lightBrightness,
-            min: 0,
-            max: 100,
-            step: 5,
-            style: SliderStyle.OutSet
-          })
-            .blockColor('#FFC107')
-            .trackColor('#FFF9C4')
-            .onChange((value: number) => {
-              this.lightBrightness = Math.round(value);
-              dataManager.setLightConfig({ brightness: this.lightBrightness });
-            });
-        }
-        .width('90%')
-        .padding(15)
-        .backgroundColor('#FFFFFF')
-        .borderRadius(10)
-        .margin({ bottom: 20 });
-
-        Column() {
-          Text('定时设置')
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
-            .margin({ bottom: 10 });
-
-          Row() {
-            Text('开启时间: ')
-              .fontSize(14);
-            Text(this.startTime)
-              .fontSize(14)
-              .fontWeight(FontWeight.Bold);
-          }
-          .width('100%')
-          .margin({ bottom: 8 });
-
-          Row() {
-            Text('关闭时间: ')
-              .fontSize(14);
-            Text(this.endTime)
-              .fontSize(14)
-              .fontWeight(FontWeight.Bold);
-          }
-          .width('100%');
-        }
-        .width('90%')
-        .padding(15)
-        .backgroundColor('#FFFFFF')
-        .borderRadius(10)
-        .margin({ bottom: 20 });
-
-        Button(this.isLightOn ? '关闭灯光' : '开启灯光')
+        Button(this.lightOn ? '关闭补光' : '开启补光')
           .width('90%')
           .height(50)
-          .backgroundColor(this.isLightOn ? '#FF9800' : '#FFC107')
+          .backgroundColor(this.lightOn ? '#F44336' : '#4CAF50')
           .onClick(() => {
-            this.isLightOn = !this.isLightOn;
-            dataManager.setLightConfig({ isOn: this.isLightOn });
+            this.toggleLight();
           })
           .margin({ bottom: 30 });
       }
       .width('100%')
-      .backgroundColor('#F5F5F5');
+      .backgroundColor('#FFA726');
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F5F5F5')
+    .backgroundColor('#FFA726')
     .scrollBar(BarState.Auto);
+  }
+
+  @Builder
+  LightSliderBuilder(label: string, brightness: number, onChange: (value: number) => void) {
+    Row({ space: 10 }) {
+      Text(label)
+        .fontSize(16)
+        .width('25%');
+
+      Slider({
+        value: brightness,
+        min: 0,
+        max: 100,
+        step: 5,
+        style: SliderStyle.OutSet
+      })
+        .blockColor('#FFC107')
+        .trackColor('#FFF9C4')
+        .width('60%')
+        .onChange((sliderValue: number) => {
+          const roundedValue = Math.round(sliderValue);
+          onChange(roundedValue);
+        });
+
+      Column() {
+        Circle({ width: 12, height: 12 })
+          .fill(this.isMqttMode ? '#4CAF50' : '#F44336');
+        Text(this.isMqttMode ? '已连接' : '离线')
+          .fontSize(8)
+          .fontColor(this.isMqttMode ? '#4CAF50' : '#F44336')
+          .margin({ top: 2 });
+      }
+      .width('15%')
+      .justifyContent(FlexAlign.Center)
+      .alignItems(HorizontalAlign.Center);
+    }
+    .width('100%')
+    .padding(15)
+    .backgroundColor('#FFE0B2')
+    .borderRadius(10)
+    .alignItems(VerticalAlign.Center);
   }
 }
