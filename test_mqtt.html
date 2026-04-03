@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>MQTT WebSocket Test</title>
+</head>
+<body>
+    <h1>MQTT WebSocket Test</h1>
+    <div>
+        <button onclick="test1()">Test 1: ws://broker.emqx.io:8083/mqtt</button>
+        <button onclick="test2()">Test 2: ws://broker.emqx.io:8083/mqtt (with protocol)</button>
+        <button onclick="test3()">Test 3: wss://broker.emqx.io:8084/mqtt</button>
+    </div>
+    <div id="log" style="margin-top: 20px; padding: 10px; background: #f0f0f0; height: 400px; overflow: auto; font-family: monospace;"></div>
+    <script>
+        function log(msg) {
+            const div = document.getElementById('log');
+            div.innerHTML += new Date().toLocaleTimeString() + ' - ' + msg + '<br>';
+            div.scrollTop = div.scrollHeight;
+        }
+
+        function test1() {
+            log('=== Test 1: No protocol header ===');
+            const ws = new WebSocket('ws://broker.emqx.io:8083/mqtt');
+            
+            ws.onopen = function() {
+                log('WebSocket OPENED!');
+                log('Sending MQTT CONNECT...');
+                const clientId = 'browser-' + Date.now();
+                const clientIdBytes = new TextEncoder().encode(clientId);
+                const packet = new Uint8Array(12 + 2 + clientIdBytes.length);
+                packet[0] = 0x10;
+                packet[1] = 12 + 2 + clientIdBytes.length - 2;
+                packet[2] = 0x00; packet[3] = 0x04;
+                packet[4] = 0x4D; packet[5] = 0x51; packet[6] = 0x54; packet[7] = 0x54;
+                packet[8] = 0x04;
+                packet[9] = 0x02;
+                packet[10] = 0x00; packet[11] = 0x3C;
+                packet[12] = (clientIdBytes.length >> 8) & 0xFF;
+                packet[13] = clientIdBytes.length & 0xFF;
+                packet.set(clientIdBytes, 14);
+                ws.send(packet);
+                log('MQTT CONNECT sent, clientId: ' + clientId);
+            };
+            
+            ws.onmessage = function(e) {
+                log('Received: ' + (e.data instanceof ArrayBuffer ? 'ArrayBuffer' : 'String') + ' length: ' + e.data.byteLength);
+                if (e.data instanceof ArrayBuffer) {
+                    const data = new Uint8Array(e.data);
+                    log('Packet type: ' + ((data[0] & 0xF0) >> 4));
+                    if ((data[0] & 0xF0) === 0x20) {
+                        log('CONNACK received! Return code: ' + data[3]);
+                        if (data[3] === 0) {
+                            log('SUCCESS! MQTT connected!');
+                        }
+                    }
+                }
+            };
+            
+            ws.onerror = function(e) {
+                log('ERROR: ' + JSON.stringify(e));
+            };
+            
+            ws.onclose = function(e) {
+                log('CLOSED: code=' + e.code + ' reason=' + e.reason);
+            };
+        }
+
+        function test2() {
+            log('=== Test 2: With mqttv3.1.1 protocol ===');
+            try {
+                const ws = new WebSocket('ws://broker.emqx.io:8083/mqtt', 'mqttv3.1.1');
+                
+                ws.onopen = function() {
+                    log('WebSocket OPENED with protocol!');
+                    log('Protocol: ' + ws.protocol);
+                };
+                
+                ws.onerror = function(e) {
+                    log('ERROR: ' + JSON.stringify(e));
+                };
+                
+                ws.onclose = function(e) {
+                    log('CLOSED: code=' + e.code + ' reason=' + e.reason);
+                };
+            } catch(e) {
+                log('Exception: ' + e.message);
+            }
+        }
+
+        function test3() {
+            log('=== Test 3: WSS (secure) ===');
+            try {
+                const ws = new WebSocket('wss://broker.emqx.io:8084/mqtt', 'mqtt');
+                
+                ws.onopen = function() {
+                    log('WSS WebSocket OPENED!');
+                    log('Protocol: ' + ws.protocol);
+                };
+                
+                ws.onerror = function(e) {
+                    log('ERROR: ' + JSON.stringify(e));
+                };
+                
+                ws.onclose = function(e) {
+                    log('CLOSED: code=' + e.code + ' reason=' + e.reason);
+                };
+            } catch(e) {
+                log('Exception: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
