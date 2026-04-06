@@ -9,13 +9,15 @@ struct ModeSelectPage {
   @State currentMode: ConnectionMode = 'local';
   @State connected: boolean = false;
   @State statusMessage: string = '本地模拟模式';
-  @State showMqttConfig: boolean = false;
   @State showBluetoothScan: boolean = false;
-  @State brokerUrl: string = 'broker.emqx.io';
-  @State port: number = 8083;
+  @State showMqttConfig: boolean = false;
   @State isScanning: boolean = false;
   @State deviceList: BleDevice[] = [];
   @State connectedDevice: BleDevice | null = null;
+  @State productId: string = 'bvEMtNm7tH';
+  @State deviceName: string = 'jiaoxue';
+  @State deviceKey: string = 'ckg5NGxRakJjT2RRWmh1TWxzMlFzTEU3V3BVeXFvR1Q=';
+  @State oneNetToken: string = 'version=2018-10-31&res=products%2FbvEMtNm7tH%2Fdevices%2Fjiaoxue&et=1806672609&method=md5&sign=XXPKQJRiLBke0PFSPY%2BQGg%3D%3D';
 
   aboutToAppear(): void {
     this.currentMode = connectionModeManager.getCurrentMode();
@@ -60,25 +62,39 @@ struct ModeSelectPage {
   }
 
   async connectMqtt(): Promise<void> {
+    if (!this.productId || !this.deviceName) {
+      this.statusMessage = '请填写产品ID和设备名称';
+      return;
+    }
+
+    if (!this.oneNetToken && !this.deviceKey) {
+      this.statusMessage = '请填写Token或设备Key';
+      return;
+    }
+
     const config: MqttConfig = {
-      brokerUrl: this.brokerUrl,
-      port: this.port,
-      clientId: 'harmony-app-client'
+      brokerUrl: 'mqtts.heclouds.com',
+      port: 1883,
+      clientId: 'harmony-app-' + Date.now(),
+      productId: this.productId,
+      deviceName: this.deviceName,
+      deviceKey: this.deviceKey,
+      token: this.oneNetToken
     };
 
-    console.log('[ModeSelectPage] Starting MQTT connection...');
+    console.log('[ModeSelectPage] Starting OneNet connection...');
     const success = await connectionModeManager.connectMqtt(config);
-    console.log('[ModeSelectPage] MQTT connection result:', success);
+    console.log('[ModeSelectPage] Connection result:', success);
     
     if (success) {
       this.showMqttConfig = false;
       this.connected = true;
-      this.statusMessage = 'MQTT已连接';
+      this.statusMessage = 'OneNet 已连接';
       setTimeout(() => {
         router.back();
       }, 500);
     } else {
-      this.statusMessage = 'MQTT连接失败';
+      this.statusMessage = 'OneNet连接失败，请检查配置';
     }
   }
 
@@ -200,7 +216,7 @@ struct ModeSelectPage {
 
       this.ModeButton('蓝牙连接', 'bluetooth', '近距离直连，10-100米', '#2196F3');
 
-      this.ModeButton('云服务 (MQTT)', 'mqtt', '远程连接，需要网络', '#4CAF50');
+      this.ModeButton('云服务 (OneNet)', 'mqtt', '远程连接，需要网络', '#4CAF50');
     }
     .width('100%')
     .padding(15)
@@ -370,37 +386,71 @@ struct ModeSelectPage {
   @Builder
   MqttConfigSection() {
     Column() {
-      Text('MQTT 配置')
+      Text('OneNet 平台配置')
         .fontSize(16)
         .fontWeight(FontWeight.Medium)
+        .margin({ bottom: 10 });
+
+      Text('使用 HTTP API 连接 OneNet 平台')
+        .fontSize(12)
+        .fontColor('#888888')
         .margin({ bottom: 15 });
 
       Row() {
-        Text('服务器地址')
-          .width(90);
-        TextInput({ text: this.brokerUrl })
+        Text('产品ID')
+          .width(70);
+        TextInput({ text: this.productId, placeholder: '请输入产品ID' })
           .width('65%')
           .onChange((value: string) => {
-            this.brokerUrl = value;
+            this.productId = value;
           });
       }
       .width('100%')
       .margin({ bottom: 10 });
 
       Row() {
-        Text('端口')
-          .width(90);
-        TextInput({ text: this.port.toString() })
+        Text('设备名称')
+          .width(70);
+        TextInput({ text: this.deviceName, placeholder: '请输入设备名称' })
           .width('65%')
-          .type(InputType.Number)
           .onChange((value: string) => {
-            this.port = parseInt(value) || 1883;
+            this.deviceName = value;
+          });
+      }
+      .width('100%')
+      .margin({ bottom: 10 });
+
+      Row() {
+        Text('Token')
+          .width(70);
+        TextInput({ text: this.oneNetToken, placeholder: '可选：从控制台生成' })
+          .width('65%')
+          .onChange((value: string) => {
+            this.oneNetToken = value;
+          });
+      }
+      .width('100%')
+      .margin({ bottom: 10 });
+
+      Text('提示：可在 OneNet 控制台 -> 设备详情 -> Token生成器 生成Token')
+        .fontSize(10)
+        .fontColor('#999999')
+        .margin({ bottom: 10 });
+
+      Row() {
+        Text('设备Key')
+          .width(70);
+        TextInput({ text: this.deviceKey, placeholder: '可选：如果没有Token' })
+          .width('65%')
+          .type(InputType.Password)
+          .onChange((value: string) => {
+            this.deviceKey = value;
           });
       }
       .width('100%')
       .margin({ bottom: 15 });
 
-      Button('连接')
+      Button('连接 OneNet')
         .width('100%')
         .backgroundColor('#4CAF50')
         .onClick(() => {

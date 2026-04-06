@@ -1,6 +1,7 @@
 import { router } from '@kit.ArkUI';
 import { mqttService } from '../services/MqttService';
 import { SensorDataModel, sensorDataModel } from '../services/SensorDataModel';
+import { AppStorageUtil } from '../services/AppStorageUtil';
 
 interface AlertItem {
   name: string;
@@ -24,10 +25,11 @@ struct AlertPage {
     { name: 'CO2浓度', key: 'co2', minValue: 300, maxValue: 1000, currentValue: 450, unit: 'ppm', isAlert: false }
   ];
   @State sensorData: SensorDataModel = sensorDataModel;
+  @StorageLink('is_connected') isConnected: boolean = false;
   @State isMqttMode: boolean = false;
 
   aboutToAppear(): void {
-    this.isMqttMode = mqttService.isConnected();
+    this.isMqttMode = AppStorageUtil.isConnected();
     this.updateCurrentValues();
     console.log('[AlertPage] aboutToAppear, isMqttMode=' + this.isMqttMode);
   }

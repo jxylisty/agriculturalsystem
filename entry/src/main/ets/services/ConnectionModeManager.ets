@@ -1,5 +1,6 @@
 import { bleService } from './BleService';
 import { mqttService, MqttConfig } from './MqttService';
+import { oneNetApiService, OneNetConfig } from './OneNetApiService';
 import { SensorData } from './BleService';
 import { dataManager } from './DataManager';
 
@@ -62,6 +63,21 @@ class ConnectionModeManager {
         this.notifyStatus();
       }
     });
+
+    oneNetApiService.onSensorData((data: SensorData) => {
+      console.log('[ConnectionModeManager] Received OneNet data:', JSON.stringify(data));
+      dataManager.updateSensorData(data);
+      if (this.currentMode === 'mqtt' && this.dataCallback) {
+        this.dataCallback(data);
+      }
+    });
+
+    oneNetApiService.onConnectionChange((connected: boolean) => {
+      if (this.currentMode === 'mqtt') {
+        this.connected = connected;
+        this.notifyStatus();
+      }
+    });
   }
 
   getCurrentMode(): ConnectionMode {
@@ -119,8 +135,13 @@ class ConnectionModeManager {
   private async disconnectCurrentMode(): Promise<void> {
     if (this.currentMode === 'bluetooth' && bleService.getConnectionStatus()) {
       await bleService.disconnect();
-    } else if (this.currentMode === 'mqtt' && mqttService.isConnected()) {
-      await mqttService.disconnect();
+    } else if (this.currentMode === 'mqtt') {
+      if (mqttService.isConnected()) {
+        await mqttService.disconnect();
+      }
+      if (oneNetApiService.isConnected()) {
+        await oneNetApiService.disconnect();
+      }
     }
   }
 
@@ -138,19 +159,28 @@ class ConnectionModeManager {
       this.setMode('mqtt');
     }
 
-    if (mqttService.isConnected()) {
-      console.log('[ConnectionModeManager] MQTT already connected');
+    if (oneNetApiService.isConnected()) {
+      console.log('[ConnectionModeManager] OneNet API already connected');
       return true;
     }
 
-    if (config) {
-      mqttService.setConfig(config);
+    if (config && config.productId && config.deviceName) {
+      const oneNetConfig: OneNetConfig = {
+        productId: config.productId,
+        deviceName: config.deviceName,
+        deviceKey: config.deviceKey,
+        token: config.token
+      };
+      oneNetApiService.setConfig(oneNetConfig);
+      
+      const success = await oneNetApiService.connect();
+      this.connected = success;
+      this.notifyStatus();
+      return success;
     }
 
-    const success = await mqttService.connect();
-    this.connected = success;
-    this.notifyStatus();
-    return success;
+    console.error('[ConnectionModeManager] OneNet config missing');
+    return false;
   }
 
   async disconnect(): Promise<void> {
@@ -169,17 +199,11 @@ class ConnectionModeManager {
       return bleService.sendCommand(cmd, value);
     } else if (this.currentMode === 'mqtt') {
       if (cmd === 'irrigation') {
-        mqttService.publishIrrigationCommand(value === 1);
-        return true;
+        return await oneNetApiService.setIrrigation(value === 1);
       } else if (cmd === 'light') {
-        mqttService.publishLightCommand(value === 1);
-        return true;
+        return await oneNetApiService.setLight(value === 1);
       } else if (cmd === 'brightness') {
-        mqttService.publishBrightnessCommand(value);
-        return true;
-      } else if (cmd === 'target_moisture') {
-        mqttService.publishTargetMoistureCommand(value);
-        return true;
+        return await oneNetApiService.setBrightness(value);
       }
     }
 

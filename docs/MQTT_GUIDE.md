@@ -2,16 +2,49 @@
 
 ## 概述
 
-MQTT 模式是独立于蓝牙模式的另一种通信方式，通过云服务器中转数据，实现远程控制。
+MQTT 模式是独立于蓝牙模式的另一种通信方式，通过云服务器中转数据，实现远程控制。本项目已适配中国移动物联网平台（OneNet）。
 
 ## 架构说明
 
 ```
 ┌─────────────┐      WiFi      ┌─────────────┐      网络      ┌─────────────┐
-│   ESP32     │ ─────────────▶ │ MQTT Broker │ ◀───────────── │  手机 APP   │
-│  (硬件端)   │                │  (云服务器)  │                │  (远程端)   │
+│   ESP32     │ ─────────────▶ │   OneNet    │ ◀───────────── │  手机 APP   │
+│  (硬件端)   │                │  (云平台)   │                │  (远程端)   │
 └─────────────┘                └─────────────┘                └─────────────┘
 ```
+
+## OneNet 平台配置
+
+### 第一步：创建产品和设备
+
+1. 登录 [OneNet 控制台](https://open.iot.10086.cn/)
+2. 创建产品，选择"物联使能" -> "MQTT"
+3. 创建设备，记录以下信息：
+   - **产品ID** (Product ID)
+   - **设备名称** (Device Name)
+   - **设备Key** (Device Key)
+
+### 第二步：配置 ESP32
+
+1. 打开 `hardware/esp32_mqtt_agriculture/esp32_mqtt_agriculture.ino`
+2. 修改配置：
+   ```cpp
+   const char* ssid = "你的WiFi名称";
+   const char* password = "你的WiFi密码";
+   
+   // OneNet 配置
+   const char* product_id = "你的产品ID";
+   const char* device_name = "你的设备名称";
+   const char* device_key = "你的设备Key";
+   ```
+3. 上传代码到 ESP32
+
+### 第三步：配置 APP
+
+1. 运行 APP，进入 MQTT 测试页面
+2. 选择"OneNet平台"模式
+3. 输入产品ID、设备名称、设备Key
+4. 点击"连接"按钮
 
 ## 文件结构
 
@@ -21,7 +54,7 @@ MQTT 模式是独立于蓝牙模式的另一种通信方式，通过云服务器
 │   ├── esp32_smart_agriculture/    # 蓝牙版本（原有）
 │   │   ├── esp32_smart_agriculture.ino
 │   │   └── README.md
-│   └── esp32_mqtt_agriculture/     # MQTT版本（新增）
+│   └── esp32_mqtt_agriculture/     # MQTT版本（OneNet适配）
 │       ├── esp32_mqtt_agriculture.ino
 │       └── README.md
 │
@@ -29,10 +62,10 @@ MQTT 模式是独立于蓝牙模式的另一种通信方式，通过云服务器
 │   ├── services/
 │   │   ├── BleService.ets          # 蓝牙服务（原有）
 │   │   ├── DataManager.ets         # 数据管理（原有）
-│   │   └── MqttService.ets         # MQTT服务（新增）
+│   │   └── MqttService.ets         # MQTT服务（OneNet适配）
 │   └── pages/
 │       ├── Index.ets               # 首页（原有）
-│       └── MqttTestPage.ets        # MQTT测试页（新增）
+│       └── MqttTestPage.ets        # MQTT测试页（OneNet配置）
 │
 └── docs/
     └── MQTT_GUIDE.md               # 本文档
@@ -71,11 +104,14 @@ MQTT 模式是独立于蓝牙模式的另一种通信方式，通过云服务器
 ```typescript
 import { mqttService, MqttConfig } from '../services/MqttService';
 
-// 设置配置
+// OneNet 配置
 const config: MqttConfig = {
-  brokerUrl: 'broker.emqx.io',
+  brokerUrl: 'mqtts.heclouds.com',
   port: 1883,
-  clientId: 'my-app-client'
+  clientId: 'harmony-app',
+  productId: '你的产品ID',
+  deviceName: '你的设备名称',
+  deviceKey: '你的设备Key'
 };
 mqttService.setConfig(config);
 ```
@@ -111,18 +147,18 @@ const latestData = mqttService.getLatestData();
 
 ```typescript
 // 灌溉控制
-await mqttService.sendIrrigationCommand(true);  // 开启
-await mqttService.sendIrrigationCommand(false); // 关闭
+mqttService.publishIrrigationCommand(true);  // 开启
+mqttService.publishIrrigationCommand(false); // 关闭
 
 // 灯光控制
-await mqttService.sendLightCommand(true);  // 开启
-await mqttService.sendLightCommand(false); // 关闭
+mqttService.publishLightCommand(true);  // 开启
+mqttService.publishLightCommand(false); // 关闭
 
 // 亮度设置
-await mqttService.sendBrightnessCommand(80);  // 80%
+mqttService.publishBrightnessCommand(80);  // 80%
 
 // 目标湿度设置
-await mqttService.sendTargetMoistureCommand(60);  // 60%
+mqttService.publishTargetMoistureCommand(60);  // 60%
 ```
 
 ### 连接状态监听
@@ -135,6 +171,33 @@ mqttService.onConnectionChange((connected: boolean) => {
     console.log('MQTT 已断开');
   }
 });
+```
+
+## OneNet 数据格式
+
+### 上报数据格式
+
+```json
+{
+  "params": {
+    "temperature": 25.5,
+    "humidity": 65,
+    "soilMoisture": 45,
+    "lightLevel": 300,
+    "waterLevel": 75,
+    "co2": 450
+  }
+}
+```
+
+### 控制命令格式
+
+```json
+{
+  "cmd": "irrigation",
+  "value": 1,
+  "timestamp": 1700000000000
+}
 ```
 
 ## 与蓝牙模式的切换
@@ -170,8 +233,8 @@ export class DataManager {
 
 1. **网络依赖**：MQTT 模式需要设备连接网络
 2. **延迟**：相比蓝牙直连，MQTT 有网络延迟
-3. **服务器选择**：公共服务器不稳定，生产环境建议使用云平台
-4. **安全性**：公共服务器无加密，敏感数据请使用 TLS
+3. **OneNet 认证**：需要正确配置产品ID、设备名称和设备Key
+4. **Token 生成**：系统会自动生成 OneNet 认证 Token
 
 ## 常见问题
 
@@ -179,23 +242,23 @@ export class DataManager {
 
 A: 检查以下几点：
 - WiFi 是否正常
-- Broker 地址是否正确
-- 端口是否正确（通常是 1883）
+- OneNet 产品ID、设备名称、设备Key是否正确
+- 设备是否已在 OneNet 平台创建
 - 网络是否允许访问外网
 
 ### Q: 收不到数据？
 
 A: 检查：
 - ESP32 是否正常上传数据（查看串口输出）
-- Topic 是否一致
-- 是否已订阅正确的 Topic
+- 设备是否已连接到 OneNet 平台
+- 数据格式是否符合 OneNet 要求
 
 ### Q: 命令发送后无响应？
 
 A: 检查：
 - ESP32 是否正常接收命令（查看串口输出）
 - 命令格式是否正确
-- Topic 是否一致
+- 主题订阅是否正确
 
 ## 相关文档
 

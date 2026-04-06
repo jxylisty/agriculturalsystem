@@ -2,6 +2,8 @@
 #include <PubSubClient.h>
 #include <DHT.h>
 #include <ArduinoJson.h>
+#include <base64.h>
+#include <mbedtls/md.h>
 
 #define DHTPIN 4
 #define DHTTYPE DHT11
@@ -14,11 +16,21 @@
 
 const char* ssid = "YOUR_WIFI_SSID";
 const char* password = "YOUR_WIFI_PASSWORD";
-const char* mqtt_server = "broker.emqx.io";
+
+// OneNet MQTT 配置
+const char* mqtt_server = "mqtts.heclouds.com";
 const int mqtt_port = 1883;
-const char* mqtt_client_id = "esp32-agriculture";
-const char* topic_data = "/hi3861/temperature";
-const char* topic_cmd = "agriculture/cmd";
+const char* product_id = "bvEMtNm7tH";
+const char* device_name = "jiaoxue";
+const char* device_key = "ckg5NGxRakJjT2RRWmh1TWxzMlFzTEU3V3BVeXFvR1Q=";
+
+// OneNet 主题
+const char* topic_data = "$sys/" + String(product_id) + "/" + String(device_name) + "/thing/property/post";
+const char* topic_cmd = "$sys/" + String(product_id) + "/" + String(device_name) + "/thing/service/+/invoke";
+
+String mqtt_client_id;
+String mqtt_username;
+String mqtt_password;
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
@@ -45,6 +57,42 @@ SensorData sensorData;
 ControlState controlState;
 unsigned long lastMsgTime = 0;
 const long msgInterval = 5000;
+
+String generateOneNetToken() {
+  String version = "2018-10-31";
+  unsigned long et = millis() / 1000 + 3600 * 24 * 365;
+  String method = "sha256";
+  String res = "products/" + String(product_id) + "/devices/" + String(device_name);
+  
+  String stringToSign = String(et) + "\n" + method + "\n" + res + "\n" + version;
+  
+  unsigned char hmacResult[32];
+  mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
+                  (const unsigned char*)device_key, strlen(device_key),
+                  (const unsigned char*)stringToSign.c_str(), stringToSign.length(),
+                  hmacResult);
+  
+  String sign = base64::encode(hmacResult, 32);
+  sign.replace("\n", "");
+  
+  String token = version + "&" + String(et) + "&" + method + "&" + res + "&" + sign;
+  return token;
+}
+
+void initOneNetConfig() {
+  mqtt_client_id = String(device_name);
+  mqtt_username = String(product_id);
+  mqtt_password = generateOneNetToken();
+  
+  Serial.println("=== OneNet Config ===");
+  Serial.print("Client ID: ");
+  Serial.println(mqtt_client_id);
+  Serial.print("Username: ");
+  Serial.println(mqtt_username);
+  Serial.print("Token generated: ");
+  Serial.println(mqtt_password.length() > 20 ? "OK" : mqtt_password);
+  Serial.println("====================");
+}
 
 void setupWifi() {
   delay(10);
@@ -110,9 +158,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
 void reconnect() {
   while (!mqttClient.connected()) {
-    Serial.print("Attempting MQTT connection...");
+    Serial.print("Attempting MQTT connection to OneNet...");
     
-    if (mqttClient.connect(mqtt_client_id)) {
+    if (mqttClient.connect(mqtt_client_id.c_str(), mqtt_username.c_str(), mqtt_password.c_str())) {
       Serial.println("connected");
       mqttClient.subscribe(topic_cmd);
       Serial.printf("Subscribed to: %s\n", topic_cmd);
@@ -170,16 +218,20 @@ void readSensors() {
 }
 
 void publishSensorData() {
-  // 简化的消息格式，只包含温度和timestamp
-  StaticJsonDocument<128> doc;
-  doc["temperature"] = sensorData.temperature;
-  doc["timestamp"] = sensorData.timestamp;
-
-  char jsonBuffer[128];
+  StaticJsonDocument<256> doc;
+  JsonObject params = doc.createNestedObject("params");
+  params["temperature"] = sensorData.temperature;
+  params["humidity"] = sensorData.humidity;
+  params["soilMoisture"] = sensorData.soilMoisture;
+  params["lightLevel"] = sensorData.lightLevel;
+  params["waterLevel"] = sensorData.waterLevel;
+  params["co2"] = sensorData.co2;
+  
+  char jsonBuffer[256];
   serializeJson(doc, jsonBuffer);
 
   mqttClient.publish(topic_data, jsonBuffer);
-  Serial.print("Published (simplified format): ");
+  Serial.print("Published to OneNet: ");
   Serial.println(jsonBuffer);
 }
 
@@ -200,11 +252,12 @@ void setup() {
 
   setupWifi();
 
+  initOneNetConfig();
+  
   mqttClient.setServer(mqtt_server, mqtt_port);
   mqttClient.setCallback(callback);
 
-  Serial.println("Hi3861 Temperature MQTT System Started");
-  Serial.println("Using simplified message format for Hi3861 compatibility");
+  Serial.println("OneNet MQTT Agriculture System Started");
 }
 
 void loop() {

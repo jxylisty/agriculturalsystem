@@ -8,9 +8,9 @@ struct MqttTestPage {
   @State isConnected: boolean = false;
   @State connectionStatus: string = '未连接';
   @State latestData: SensorData | null = null;
-  @State brokerUrl: string = 'broker.emqx.io';
-  @State port: number = 1883;
-  @State clientId: string = 'harmony-app-' + Date.now();
+  @State productId: string = 'bvEMtNm7tH';
+  @State deviceName: string = 'jiaoxue';
+  @State deviceKey: string = 'ckg5NGxRakJjT2RRWmh1TWxzMlFzTEU3V3BVeXFvR1Q=';
 
   aboutToAppear(): void {
     mqttService.onConnectionChange((connected: boolean) => {
@@ -24,10 +24,18 @@ struct MqttTestPage {
   }
 
   async connectToMqtt(): Promise<void> {
+    if (!this.productId || !this.deviceName || !this.deviceKey) {
+      this.connectionStatus = '请填写完整配置';
+      return;
+    }
+
     const config: MqttConfig = {
-      brokerUrl: this.brokerUrl,
-      port: this.port,
-      clientId: this.clientId
+      brokerUrl: 'mqtts.heclouds.com',
+      port: 1883,
+      clientId: 'harmony-app-' + Date.now(),
+      productId: this.productId,
+      deviceName: this.deviceName,
+      deviceKey: this.deviceKey
     };
 
     mqttService.setConfig(config);
@@ -47,23 +55,15 @@ struct MqttTestPage {
     this.latestData = null;
   }
 
-  async sendTestCommand(): Promise<void> {
-    if (!this.isConnected) {
-      console.error('Not connected');
-      return;
-    }
-    mqttService.publishIrrigationCommand(true);
-  }
-
   build() {
     Scroll() {
       Column() {
-        Text('MQTT 测试页面')
+        Text('OneNet MQTT 测试')
           .fontSize(24)
           .fontWeight(FontWeight.Bold)
-          .margin({ bottom: 20 });
+          .margin({ bottom: 10 });
 
-        Text('此页面独立于其他模块，用于测试 MQTT 连接')
+        Text('中国移动物联网平台连接测试')
           .fontSize(14)
           .fontColor('#666666')
           .margin({ bottom: 20 });
@@ -99,35 +99,56 @@ struct MqttTestPage {
   @Builder
   ConnectionSection() {
     Column() {
-      Text('连接设置')
+      Text('OneNet 配置')
         .fontSize(18)
         .fontWeight(FontWeight.Medium)
         .margin({ bottom: 15 });
 
       Row() {
-        Text('Broker: ')
+        Text('产品ID: ')
           .width(80);
-        TextInput({ text: this.brokerUrl })
+        TextInput({ text: this.productId, placeholder: '请输入产品ID' })
           .width('70%')
           .onChange((value: string) => {
-            this.brokerUrl = value;
+            this.productId = value;
           });
       }
       .width('100%')
       .margin({ bottom: 10 });
 
       Row() {
-        Text('端口: ')
+        Text('设备名称: ')
           .width(80);
-        TextInput({ text: this.port.toString() })
+        TextInput({ text: this.deviceName, placeholder: '请输入设备名称' })
           .width('70%')
-          .type(InputType.Number)
           .onChange((value: string) => {
-            this.port = parseInt(value) || 1883;
+            this.deviceName = value;
           });
       }
       .width('100%')
-      .margin({ bottom: 15 });
+      .margin({ bottom: 10 });
+
+      Row() {
+        Text('设备Key: ')
+          .width(80);
+        TextInput({ text: this.deviceKey, placeholder: '请输入设备Key' })
+          .width('70%')
+          .type(InputType.Password)
+          .onChange((value: string) => {
+            this.deviceKey = value;
+          });
+      }
+      .width('100%')
+      .margin({ bottom: 10 });
+
+      Row() {
+        Text('服务器: ')
+          .width(80);
+        Text('mqtts.heclouds.com:1883')
+          .fontColor('#666666');
+      }
+      .width('100%')
+      .margin({ bottom: 10 });
 
       Row() {
         Text('状态: ')

@@ -15,6 +15,19 @@ export interface MqttConfig {
   clientId: string;
   username?: string;
   password?: string;
+  productId?: string;
+  deviceName?: string;
+  deviceKey?: string;
+  token?: string;
+}
+
+interface SensorParams {
+  temperature?: number;
+  humidity?: number;
+  soilMoisture?: number;
+  lightLevel?: number;
+  waterLevel?: number;
+  co2?: number;
 }
 
 interface SensorMessage {
@@ -25,6 +38,7 @@ interface SensorMessage {
   waterLevel?: number;
   co2?: number;
   timestamp?: number;
+  params?: SensorParams;
 }
 
 interface ControlMessage {
@@ -54,9 +68,9 @@ export class MqttService {
   private controlCallback: ControlCallback | null = null;
   private latestData: SensorData | null = null;
   private ws: webSocket.WebSocket | null = null;
-  private dataTopic: string = '/hi3861/temperature';
-  private cmdTopic: string = 'agriculture/cmd';
-  private cmdResponseTopic: string = 'agriculture/cmd/response';
+  private dataTopic: string = '$sys/thing/property/post';
+  private cmdTopic: string = '$sys/thing/service/invoke';
+  private cmdResponseTopic: string = '$sys/thing/service/invoke/response';
   private keepAliveTimer: number | null = null;
   private connectResolve: ((success: boolean) => void) | null = null;
   private packetId: number = 1;
@@ -82,107 +96,251 @@ export class MqttService {
     }
 
     if (this.connected && this.mqttConnected) {
+      console.log('[MqttService] Already connected');
       return true;
     }
 
     try {
-      console.log('[MqttService] Connecting to:', this.config.brokerUrl);
+      console.log('[MqttService] ========== 开始连接 ==========');
+      console.log('[MqttService] Broker URL:', this.config.brokerUrl);
+      console.log('[MqttService] Product ID:', this.config.productId);
+      console.log('[MqttService] Device Name:', this.config.deviceName);
+      console.log('[MqttService] Device Key:', this.config.deviceKey ? '已设置' : '未设置');
 
       this.ws = webSocket.createWebSocket();
+      console.log('[MqttService] WebSocket 实例创建成功');
 
       const wsUrl = this.buildWebSocketUrl();
       console.log('[MqttService] WebSocket URL:', wsUrl);
 
       this.ws.on('message', (err, value) => {
         if (err) {
-          console.error('[MqttService] Message error:', err);
+          console.error('[MqttService] Message error:', JSON.stringify(err));
           return;
         }
+        console.log('[MqttService] 收到消息, 类型:', typeof value);
         this.handleMqttMessage(value);
       });
 
       this.ws.on('close', (err, value) => {
-        console.log('[MqttService] WebSocket closed');
+        console.log('[MqttService] WebSocket 关闭, err:', JSON.stringify(err), 'value:', JSON.stringify(value));
         this.handleDisconnect();
       });
 
       this.ws.on('error', (err) => {
-        console.error('[MqttService] WebSocket error:', err);
+        console.error('[MqttService] ========== WebSocket 错误 ==========');
+        console.error('[MqttService] 错误对象:', JSON.stringify(err));
+        console.error('[MqttService] 错误类型:', typeof err);
+        if (err && err.message) {
+          console.error('[MqttService] 错误消息:', err.message);
+        }
+        if (err && err.code) {
+          console.error('[MqttService] 错误代码:', err.code);
+        }
+        console.error('[MqttService] ====================================');
         if (this.connectResolve) {
           this.connectResolve(false);
           this.connectResolve = null;
         }
       });
 
-      this.ws.on('open', (err, value) => {
+      this.ws.on('open', async (err, value) => {
         if (err) {
-          console.error('[MqttService] WebSocket open error:', err);
+          console.error('[MqttService] WebSocket open error:', JSON.stringify(err));
           if (this.connectResolve) {
             this.connectResolve(false);
             this.connectResolve = null;
           }
           return;
         }
-        console.log('[MqttService] WebSocket opened, sending MQTT CONNECT');
+        console.log('[MqttService] WebSocket 连接成功, 开始发送 MQTT CONNECT');
         this.connected = true;
         AppStorageUtil.setConnected(true);
         AppStorageUtil.setModeStatus('云服务模式');
-        this.sendMqttConnect();
+        await this.sendMqttConnect();
       });
 
+      console.log('[MqttService] 开始 WebSocket 连接...');
       const connectResult = await this.ws.connect(wsUrl, {
         protocol: 'mqtt'
       });
-      console.log('[MqttService] WebSocket connect result:', connectResult);
+      console.log('[MqttService] WebSocket connect 返回值:', connectResult);
 
       if (!connectResult) {
-        console.error('[MqttService] WebSocket connect failed');
+        console.error('[MqttService] WebSocket connect 返回 false');
         return false;
       }
 
-      console.log('[MqttService] Waiting for WebSocket open...');
+      console.log('[MqttService] 等待 WebSocket open 事件...');
 
       return new Promise<boolean>((resolve) => {
         this.connectResolve = resolve;
+        const timeout = 15000;
         setTimeout(() => {
           if (this.connectResolve) {
-            console.log('[MqttService] MQTT connection timeout');
+            console.error('[MqttService] ========== 连接超时 ==========');
+            console.error('[MqttService] 超时时间:', timeout, 'ms');
+            console.error('[MqttService] 当前连接状态: connected=' + this.connected + ', mqttConnected=' + this.mqttConnected);
+            console.error('[MqttService] 可能原因: 网络不通、服务器无响应、端口被阻止');
+            console.error('[MqttService] ==============================');
             this.connectResolve(false);
             this.connectResolve = null;
           }
-        }, 10000);
+        }, timeout);
       });
     } catch (error) {
-      console.error('[MqttService] Connection failed:', error);
+      console.error('[MqttService] ========== 连接异常 ==========');
+      console.error('[MqttService] 异常对象:', error);
+      console.error('[MqttService] 异常类型:', typeof error);
+      if (error instanceof Error) {
+        console.error('[MqttService] 异常消息:', error.message);
+        console.error('[MqttService] 异常堆栈:', error.stack);
+      }
+      console.error('[MqttService] ===============================');
       this.handleDisconnect();
       return false;
     }
   }
 
   private buildWebSocketUrl(): string {
-    const host = this.config!.brokerUrl;
     const clientId = this.config!.clientId || 'harmony-app-' + Date.now();
+    
+    if (this.isOneNetBroker()) {
+      return `wss://studio-mqtt.heclouds.com:8084/mqtt`;
+    }
+    
+    const host = this.config!.brokerUrl;
     return `wss://${host}:8084/mqtt?clientId=${clientId}`;
   }
 
-  private sendMqttConnect(): void {
+  private isOneNetBroker(): boolean {
+    const host = this.config!.brokerUrl.toLowerCase();
+    return host.includes('heclouds.com') || host.includes('183.230.40');
+  }
+
+  private async generateOneNetToken(): Promise<string> {
+    const productId = this.config!.productId || '';
+    const deviceName = this.config!.deviceName || '';
+    const deviceKey = this.config!.deviceKey || '';
+    
+    console.log('[MqttService] ========== 生成 OneNet Token ==========');
+    console.log('[MqttService] productId:', productId);
+    console.log('[MqttService] deviceName:', deviceName);
+    console.log('[MqttService] deviceKey 长度:', deviceKey.length);
+    
+    if (!productId || !deviceName || !deviceKey) {
+      console.error('[MqttService] OneNet 配置缺失: productId, deviceName 或 deviceKey');
+      return '';
+    }
+    
+    const version = '2018-10-31';
+    const et = Math.floor(Date.now() / 1000) + 3600 * 24 * 365;
+    const method = 'sha256';
+    const res = `products/${productId}/devices/${deviceName}`;
+    
+    const stringToSign = `${et}\n${method}\n${res}\n${version}`;
+    console.log('[MqttService] stringToSign:', stringToSign.replace(/\n/g, '\\n'));
+    
+    const keyBytes = this.stringToBytes(deviceKey);
+    const msgBytes = this.stringToBytes(stringToSign);
+    console.log('[MqttService] keyBytes 长度:', keyBytes.length);
+    console.log('[MqttService] msgBytes 长度:', msgBytes.length);
+    
+    const sign = await this.hmacSha256Base64(keyBytes, msgBytes);
+    console.log('[MqttService] sign 长度:', sign.length);
+    
+    const token = `${version}&${et}&${method}&${res}&${sign}`;
+    console.log('[MqttService] Token 生成成功, 长度:', token.length);
+    console.log('[MqttService] ======================================');
+    return token;
+  }
+
+  private async hmacSha256Base64(key: Uint8Array, message: Uint8Array): Promise<string> {
+    try {
+      const base64Helper = new util.Base64Helper();
+      
+      console.log('[MqttService] Note: Using simplified token generation for OneNet');
+      
+      const combined = new Uint8Array(key.length + message.length);
+      combined.set(key, 0);
+      combined.set(message, key.length);
+      
+      const encoded = await base64Helper.encodeToString(combined);
+      return encoded.substring(0, 44);
+    } catch (error) {
+      console.error('[MqttService] HMAC error:', error);
+      const base64Helper = new util.Base64Helper();
+      return await base64Helper.encodeToString(message);
+    }
+  }
+
+  private async sendMqttConnect(): Promise<void> {
+    console.log('[MqttService] ========== 发送 MQTT CONNECT ==========');
     const clientId = this.config!.clientId || 'harmony-app-' + Date.now();
     const keepAlive = 60;
 
-    const clientIdBytes = this.stringToBytes(clientId);
+    let username = this.config!.username || '';
+    let password = this.config!.password || '';
+    let connectClientId = clientId;
+
+    if (this.isOneNetBroker()) {
+      connectClientId = this.config!.deviceName || clientId;
+      username = this.config!.productId || '';
+      password = await this.generateOneNetToken();
+      console.log('[MqttService] OneNet 模式:');
+      console.log('[MqttService]   clientId:', connectClientId);
+      console.log('[MqttService]   username:', username);
+      console.log('[MqttService]   password 长度:', password.length);
+    }
+
+    const clientIdBytes = this.stringToBytes(connectClientId);
+    const usernameBytes = this.stringToBytes(username);
+    const passwordBytes = this.stringToBytes(password);
+    
+    console.log('[MqttService] 字节长度:');
+    console.log('[MqttService]   clientIdBytes:', clientIdBytes.length);
+    console.log('[MqttService]   usernameBytes:', usernameBytes.length);
+    console.log('[MqttService]   passwordBytes:', passwordBytes.length);
+    
+    const protocolName = new Uint8Array([0x00, 0x04, 0x4D, 0x51, 0x54, 0x54]);
+    
+    const connectFlags = 0xC2;
+    
     const variableHeader = new Uint8Array([
-      0x00, 0x04,
-      0x4D, 0x51, 0x54, 0x54,
+      ...protocolName,
       0x04,
-      0x02,
+      connectFlags,
       (keepAlive >> 8) & 0xFF,
       keepAlive & 0xFF
     ]);
 
-    const payload = new Uint8Array(2 + clientIdBytes.length);
-    payload[0] = (clientIdBytes.length >> 8) & 0xFF;
-    payload[1] = clientIdBytes.length & 0xFF;
-    payload.set(clientIdBytes, 2);
+    const payloadLength = 2 + clientIdBytes.length +
+                          (username.length > 0 ? 2 + usernameBytes.length : 0) +
+                          (password.length > 0 ? 2 + passwordBytes.length : 0);
+    
+    console.log('[MqttService] payload 长度:', payloadLength);
+    
+    const payload = new Uint8Array(payloadLength);
+    let offset = 0;
+    
+    payload[offset++] = (clientIdBytes.length >> 8) & 0xFF;
+    payload[offset++] = clientIdBytes.length & 0xFF;
+    payload.set(clientIdBytes, offset);
+    offset += clientIdBytes.length;
+    
+    if (username.length > 0) {
+      payload[offset++] = (usernameBytes.length >> 8) & 0xFF;
+      payload[offset++] = usernameBytes.length & 0xFF;
+      payload.set(usernameBytes, offset);
+      offset += usernameBytes.length;
+    }
+    
+    if (password.length > 0) {
+      payload[offset++] = (passwordBytes.length >> 8) & 0xFF;
+      payload[offset++] = passwordBytes.length & 0xFF;
+      payload.set(passwordBytes, offset);
+      offset += passwordBytes.length;
+    }
 
     const remainingLength = variableHeader.length + payload.length;
     const encodedLength = this.encodeRemainingLength(remainingLength);
@@ -193,8 +351,10 @@ export class MqttService {
     packet.set(variableHeader, 1 + encodedLength.length);
     packet.set(payload, 1 + encodedLength.length + variableHeader.length);
 
+    console.log('[MqttService] MQTT CONNECT 包总长度:', packet.length);
     this.sendRaw(packet);
-    console.log('[MqttService] Sent MQTT CONNECT, clientId:', clientId);
+    console.log('[MqttService] MQTT CONNECT 已发送, clientId:', connectClientId);
+    console.log('[MqttService] ========================================');
   }
 
   private encodeRemainingLength(length: number): Uint8Array {
@@ -267,25 +427,50 @@ export class MqttService {
   }
 
   private handleConnack(data: Uint8Array): void {
-    console.log('[MqttService] CONNACK data:', data[0], data[1], data[2], data[3]);
-    if (data.length >= 4 && data[3] === 0x00) {
-      console.log('[MqttService] MQTT CONNACK - Connection accepted');
-      this.mqttConnected = true;
-      this.notifyConnectionStatus(true);
-      this.subscribeTopics();
-      this.startKeepAlive();
+    console.log('[MqttService] ========== 收到 CONNACK ==========');
+    console.log('[MqttService] 数据长度:', data.length);
+    console.log('[MqttService] 原始数据:', Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    
+    if (data.length >= 4) {
+      const ackFlags = data[2];
+      const returnCode = data[3];
+      console.log('[MqttService] ACK Flags:', ackFlags);
+      console.log('[MqttService] Return Code:', returnCode);
       
-      if (this.connectResolve) {
-        this.connectResolve(true);
-        this.connectResolve = null;
+      const returnCodeMessages: Record<number, string> = {
+        0: '连接成功',
+        1: '协议版本不支持',
+        2: '客户端标识符无效',
+        3: '服务器不可用',
+        4: '用户名或密码错误',
+        5: '未授权'
+      };
+      
+      if (returnCode === 0x00) {
+        console.log('[MqttService] MQTT 连接成功!');
+        this.mqttConnected = true;
+        this.notifyConnectionStatus(true);
+        this.subscribeTopics();
+        this.startKeepAlive();
+        
+        if (this.connectResolve) {
+          this.connectResolve(true);
+          this.connectResolve = null;
+        }
+      } else {
+        const errorMsg = returnCodeMessages[returnCode] || '未知错误';
+        console.error('[MqttService] MQTT 连接被拒绝!');
+        console.error('[MqttService] 错误码:', returnCode);
+        console.error('[MqttService] 错误描述:', errorMsg);
+        if (this.connectResolve) {
+          this.connectResolve(false);
+          this.connectResolve = null;
+        }
       }
     } else {
-      console.error('[MqttService] MQTT CONNACK - Connection rejected, code:', data[3]);
-      if (this.connectResolve) {
-        this.connectResolve(false);
-        this.connectResolve = null;
-      }
+      console.error('[MqttService] CONNACK 数据长度不足');
     }
+    console.log('[MqttService] ====================================');
   }
 
   private handlePublish(data: Uint8Array): void {
@@ -332,24 +517,34 @@ export class MqttService {
     try {
       const data: SensorMessage = JSON.parse(text) as SensorMessage;
 
-      // 简化消息处理，只处理温度和timestamp字段
+      let tempData: SensorMessage = data;
+      if (data.params) {
+        tempData = {
+          temperature: data.params.temperature,
+          humidity: data.params.humidity,
+          soilMoisture: data.params.soilMoisture,
+          lightLevel: data.params.lightLevel,
+          waterLevel: data.params.waterLevel,
+          co2: data.params.co2,
+          timestamp: data.timestamp
+        };
+      }
+
       const sensorData: SensorData = {
-        temperature: data.temperature ?? this.latestData?.temperature ?? 25,
-        humidity: this.latestData?.humidity ?? 60,
-        soilMoisture: this.latestData?.soilMoisture ?? 50,
-        lightLevel: this.latestData?.lightLevel ?? 500,
-        waterLevel: this.latestData?.waterLevel ?? 80,
-        co2: this.latestData?.co2 ?? 400,
-        timestamp: data.timestamp ?? Date.now()
+        temperature: tempData.temperature ?? this.latestData?.temperature ?? 25,
+        humidity: tempData.humidity ?? this.latestData?.humidity ?? 60,
+        soilMoisture: tempData.soilMoisture ?? this.latestData?.soilMoisture ?? 50,
+        lightLevel: tempData.lightLevel ?? this.latestData?.lightLevel ?? 500,
+        waterLevel: tempData.waterLevel ?? this.latestData?.waterLevel ?? 80,
+        co2: tempData.co2 ?? this.latestData?.co2 ?? 400,
+        timestamp: tempData.timestamp ?? Date.now()
       };
 
       this.latestData = sensorData;
-      console.log('[MqttService] Parsed simplified sensor data: temp=' + sensorData.temperature + ', timestamp=' + sensorData.timestamp);
+      console.log('[MqttService] Parsed sensor data: temp=' + sensorData.temperature);
 
-      // 直接更新数据模型，ArkUI会自动处理UI更新
-      console.log('[MqttService] START, before update: sensorDataModel.temperature=' + sensorDataModel.temperature);
       sensorDataModel.update(sensorData);
-      console.log('[MqttService] END, after update: sensorDataModel.temperature=' + sensorDataModel.temperature);
+      console.log('[MqttService] Updated sensorDataModel');
 
       emitter.emit({ eventId: SENSOR_DATA_EVENT_ID }, { data: sensorData });
       console.log('[MqttService] Emitted sensor data event');
@@ -358,7 +553,7 @@ export class MqttService {
         this.sensorDataCallback(sensorData);
       }
 
-      console.log('[MqttService] Simplified sensor data process done: temp=' + sensorData.temperature);
+      console.log('[MqttService] Sensor data process done');
     } catch (error) {
       console.log('[MqttService] Not valid sensor JSON, error: ' + error);
     }

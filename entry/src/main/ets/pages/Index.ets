@@ -96,6 +96,11 @@ struct Index {
               .fontColor('#888888')
               .width('100%')
               .margin({ top: 5 });
+            Text(`温度: ${this.sensorData.temperature.toFixed(1)}°C | 土壤水分: ${this.sensorData.soilMoisture.toFixed(0)}%`)
+              .fontSize(12)
+              .fontColor('#666666')
+              .width('100%')
+              .margin({ top: 5 });
           }
           .width('90%')
           .padding(15)

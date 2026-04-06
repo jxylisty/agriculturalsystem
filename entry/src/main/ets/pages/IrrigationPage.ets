@@ -3,6 +3,7 @@ import { mqttService } from '../services/MqttService';
 import { ControlStateUtil, setProgrammaticUpdate, getProgrammaticUpdate } from '../services/ControlState';
 import { SensorDataModel, sensorDataModel } from '../services/SensorDataModel';
 import { promptAction } from '@kit.ArkUI';
+import { AppStorageUtil } from '../services/AppStorageUtil';
 
 @Entry
 @Component
@@ -11,6 +12,7 @@ struct IrrigationPage {
   @StorageLink('irrigationOn') irrigationOn: boolean = false;
   @StorageLink('irrigationAutoMode') irrigationAutoMode: boolean = true;
   @StorageLink('targetMoisture') targetMoisture: number = 50;
+  @StorageLink('is_connected') isConnected: boolean = false;
   @State tankWaterLevel: number = 80;
   @State pumpEfficiency: number = 85;
   @State isMqttMode: boolean = false;
@@ -20,7 +22,7 @@ struct IrrigationPage {
   @State estimatedIrrigationTime: number = 240;
 
   aboutToAppear(): void {
-    this.isMqttMode = mqttService.isConnected();
+    this.isMqttMode = AppStorageUtil.isConnected();
     console.log('[IrrigationPage] aboutToAppear, isMqttMode=' + this.isMqttMode + ', irrigationOn=' + this.irrigationOn + ', irrigationAutoMode=' + this.irrigationAutoMode);
   }
 

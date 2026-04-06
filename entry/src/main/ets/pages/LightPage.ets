@@ -3,6 +3,7 @@ import { mqttService } from '../services/MqttService';
 import { ControlStateUtil, setProgrammaticUpdate, getProgrammaticUpdate } from '../services/ControlState';
 import { SensorDataModel, sensorDataModel } from '../services/SensorDataModel';
 import { promptAction } from '@kit.ArkUI';
+import { AppStorageUtil } from '../services/AppStorageUtil';
 
 @Entry
 @Component
@@ -10,6 +11,7 @@ struct LightPage {
   @State sensorData: SensorDataModel = sensorDataModel;
   @StorageLink('lightOn') lightOn: boolean = false;
   @StorageLink('lightAutoMode') lightAutoMode: boolean = true;
+  @StorageLink('is_connected') isConnected: boolean = false;
   @State currentLightLevel: number = 300;
   @State eastBrightness: number = 50;
   @State westBrightness: number = 50;
@@ -21,7 +23,7 @@ struct LightPage {
   @State isMqttMode: boolean = false;
 
   aboutToAppear(): void {
-    this.isMqttMode = mqttService.isConnected();
+    this.isMqttMode = AppStorageUtil.isConnected();
     this.currentLightLevel = this.sensorData.lightLevel;
     console.log('[LightPage] aboutToAppear, isMqttMode=' + this.isMqttMode + ', lightOn=' + this.lightOn + ', lightAutoMode=' + this.lightAutoMode);
   }
